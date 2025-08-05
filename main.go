@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -12,11 +13,12 @@ import (
 )
 
 type TodoItem struct {
-	Id        int        `json:"id" gorm:"column:id;"`
-	Title     string     `json:"title" gorm:"column:title;"`
-	Status    string     `json:"status" gorm:"column:status;"`
-	CreatedAt *time.Time `json:"created_at" gorm:"column:created_at;"`
-	UpdatedAt *time.Time `json:"updated_at" gorm:"column:updated_at;"`
+	Id          int        `json:"id" gorm:"column:id;"`
+	Title       string     `json:"title" gorm:"column:title;"`
+	Status      string     `json:"status" gorm:"column:status;"`
+	Description string     `json:"description" gorm:"column:description;"`
+	CreatedAt   *time.Time `json:"created_at" gorm:"column:created_at;"`
+	UpdatedAt   *time.Time `json:"updated_at" gorm:"column:updated_at;"`
 }
 
 func (TodoItem) TableName() string { return "todo_items" }
@@ -41,6 +43,9 @@ func main() {
 	{
 		v1.POST("/items", createItem(db))  // create item
 		v1.GET("/items", getListItems(db)) // get list items
+		v1.GET("/items/:id", getItemById(db))
+		v1.PUT("/items/:id", updateById(db))
+		v1.DELETE("/items/:id", hardDeleteById(db))
 	}
 
 	router.Run()
@@ -99,16 +104,80 @@ func getListItems(db *gorm.DB) gin.HandlerFunc {
 		offset := (paging.Page - 1) * paging.Limit
 
 		var result []TodoItem
-
 		if err := db.Table(TodoItem{}.TableName()).
 			Count(&paging.Total).
+			Limit(paging.Limit).
 			Offset(offset).
-			Order("id desc").
+			Order("updated_at desc").
 			Find(&result).Error; err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 
-		c.JSON(http.StatusOK, gin.H{"data": result})
+		c.JSON(http.StatusOK, gin.H{"data": result, "meta": paging})
+	}
+}
+
+func getItemById(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var todoItem TodoItem
+
+		id, err := strconv.Atoi(c.Param("id"))
+
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		if err := db.Where("id = ?", id).First(&todoItem).Error; err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Todo is not found"})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"data": todoItem})
+	}
+}
+
+func hardDeleteById(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, err := strconv.Atoi(c.Param("id"))
+
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		if err := db.Table(TodoItem{}.TableName()).Where("id = ?", id).Delete(nil).Error; err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Cannot delete this todo", "data": false})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"data": true})
+	}
+}
+
+func updateById(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+
+		id, err := strconv.Atoi(c.Param("id"))
+
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		var dataItem TodoItem
+
+		if err := c.ShouldBind(&dataItem); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		if err := db.Where("id = ?", id).Updates(&dataItem).Error; err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"data": true})
 	}
 }
